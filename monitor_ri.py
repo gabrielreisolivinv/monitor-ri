@@ -178,9 +178,13 @@ def enviar_whatsapp(texto: str) -> bool:
     for tentativa in range(3):
         try:
             r = requests.get(url, timeout=30)
-            if r.ok and "error" not in r.text.lower()[:300]:
+            resposta = re.sub(r"<[^>]+>", " ", r.text)
+            resposta = re.sub(r"\s+", " ", resposta).strip()
+            if r.ok and not any(p in resposta.lower() for p in ("error", "invalid")):
                 return True
-            print(f"CallMeBot respondeu {r.status_code}: {r.text[:200]}")
+            print(f"CallMeBot recusou ({r.status_code}): {resposta[:200]}")
+            if "invalid" in resposta.lower():
+                return False  # chave/numero errados: nao adianta repetir
         except requests.RequestException as e:
             print(f"Falha ao enviar WhatsApp: {e}")
         time.sleep(5 * (tentativa + 1))
@@ -256,3 +260,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
