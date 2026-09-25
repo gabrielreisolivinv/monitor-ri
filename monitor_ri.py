@@ -50,8 +50,16 @@ CATEGORIAS = [
     "ITR",                          # resultado trimestral
     "DFP",                          # resultado anual
     "DADOS ECONOMICO-FINANCEIROS",  # release de resultados, apresentações
-    # "COMUNICADO AO MERCADO",      # tire o # para receber também comunicados
-    # "AVISO AOS ACIONISTAS",       # e avisos (dividendos/JCP)
+    "AVISO AOS ACIONISTAS",         # dividendos, JCP, bonificações
+    "COMUNICADO AO MERCADO",        # só avisa se falar de proventos (ver abaixo)
+]
+
+# Comunicados ao Mercado são muitos; só geram alerta se o assunto/tipo
+# mencionar alguma destas palavras (comparação sem acento, em maiúsculas).
+CATEGORIAS_SO_COM_PROVENTOS = ["COMUNICADO AO MERCADO"]
+PALAVRAS_PROVENTOS = [
+    "DIVIDENDO", "JCP", "JUROS SOBRE CAPITAL", "JUROS SOBRE O CAPITAL",
+    "PROVENTO", "REMUNERACAO AOS ACIONISTAS", "BONIFICACAO", "AMORTIZACAO",
 ]
 
 # ============================================================================
@@ -67,7 +75,8 @@ USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 EMOJI = {"FATO RELEVANTE": "🚨", "ITR": "📊", "DFP": "📊",
-         "DADOS ECONOMICO-FINANCEIROS": "📈"}
+         "DADOS ECONOMICO-FINANCEIROS": "📈", "AVISO AOS ACIONISTAS": "📢",
+         "COMUNICADO AO MERCADO": "📢"}
 
 
 def normalizar(txt: str) -> str:
@@ -86,6 +95,11 @@ def ticker_da_empresa(nome: str):
         if any(re.search(p, n) for p in padroes):
             return ticker
     return None
+
+
+def fala_de_proventos(*textos) -> bool:
+    t = normalizar(" ".join(textos))
+    return any(p in t for p in PALAVRAS_PROVENTOS)
 
 
 def categoria_monitorada(cat: str):
@@ -147,11 +161,15 @@ def interpretar(bruto: str, somente_monitorados=True):
         if not m:
             continue
         seq, versao, protocolo, tipo_desc = m.groups()
+        tipo = limpar_html(col[3])
+        assunto = limpar_html(col[11]) if len(col) > 11 else ""
+        if (somente_monitorados and cat in CATEGORIAS_SO_COM_PROVENTOS
+                and not fala_de_proventos(tipo, assunto)):
+            continue
         data = re.sub(r"^\d{8}\s*", "", limpar_html(col[6])).strip()
         docs.append({
             "ticker": ticker, "empresa": empresa, "categoria": categoria,
-            "cat_chave": cat, "tipo": limpar_html(col[3]),
-            "assunto": limpar_html(col[11]) if len(col) > 11 else "",
+            "cat_chave": cat, "tipo": tipo, "assunto": assunto,
             "data": data, "protocolo": protocolo,
             "link": (URL_VISUALIZAR + "?" + urlencode({"NumeroProtocoloEntrega": protocolo})
                      if tipo_desc.upper() == "IPE" else
@@ -180,6 +198,7 @@ def enviar_whatsapp(texto: str) -> bool:
             r = requests.get(url, timeout=30)
             resposta = re.sub(r"<[^>]+>", " ", r.text)
             resposta = re.sub(r"\s+", " ", resposta).strip()
+            print(f"Resposta do CallMeBot: {resposta[:300]}")
             if r.ok and not any(p in resposta.lower() for p in ("error", "invalid")):
                 return True
             print(f"CallMeBot recusou ({r.status_code}): {resposta[:200]}")
@@ -193,8 +212,11 @@ def enviar_whatsapp(texto: str) -> bool:
 
 def montar_mensagem(doc) -> str:
     emoji = EMOJI.get(doc["cat_chave"], "📄")
+    if fala_de_proventos(doc["tipo"], doc["assunto"]):
+        emoji = "💰"
     partes = [f"{emoji} *{doc['ticker']}* – {doc['categoria']}"]
-    detalhe = " | ".join(x for x in (doc["tipo"], doc["assunto"]) if x)
+    detalhe = " | ".join(x for x in (doc["tipo"], doc["assunto"])
+                         if re.search(r"\w", x or ""))
     if detalhe:
         partes.append(detalhe[:300])
     partes.append(f"🕒 {doc['data']}")
