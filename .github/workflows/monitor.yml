@@ -1,0 +1,42 @@
+name: Monitor RI
+
+on:
+  schedule:
+    # a cada 15 min, de segunda a sexta, das 07h às 23h (horário de Brasília)
+    - cron: "*/15 10-23,0-2 * * 1-5"
+    # sábado e domingo, de hora em hora
+    - cron: "0 * * * 0,6"
+  workflow_dispatch:   # permite rodar manualmente pelo botão "Run workflow"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: monitor-ri
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Verificar CVM e avisar no WhatsApp
+        env:
+          WHATSAPP_NUMERO: ${{ secrets.WHATSAPP_NUMERO }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+        run: python monitor_ri.py
+
+      - name: Salvar documentos já avisados
+        run: |
+          git config user.name "monitor-ri"
+          git config user.email "monitor-ri@users.noreply.github.com"
+          git add vistos.json
+          git diff --cached --quiet || (git commit -m "atualiza vistos" && git push)
